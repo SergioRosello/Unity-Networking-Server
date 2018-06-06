@@ -15,12 +15,12 @@ class TapNet:
 
     CHUNK_SIZE = 1000  # Tamano de los chunks, en bytes
 
-    def __init__(self, address, gameServer):
+    def __init__(self, address):
         self.address = address
         self.datagramId = 0  # Id del proximo datagrama a enviar
         self.datagrams_awating_ack = {}  # Paquetes 'confiables' enviados a la espera de confirmacion
         self.sock = socket(AF_INET, SOCK_DGRAM)
-        self.response_handler = gameServer
+        self.response_handler = None
 
     def start(self):
         print('Starting server on  {}'.format(self.address))
@@ -52,7 +52,6 @@ class TapNet:
         :param data_type: Tipo de datos a enviar, ACK, NORMAL o RELIABLE
         :param to: Cliente al que vamos a enviar los datos
         """
-        # TODO: Codificar correctamente las cabeceras.
         json_bytes = json.dumps(json_to_send).encode(encoding='utf-8')
         splitted_bytes = split(json_bytes, self.CHUNK_SIZE)
         number_of_chunks = len(splitted_bytes)
@@ -118,7 +117,7 @@ class TapNet:
                             self.send_ack(datagram_id, address)
 
                         received_json = json.loads(content.decode(encoding='utf-8'))
-                        self.response_handler.handle_json(received_json, address)
+                        self.response_handler(received_json, address)
 
     def datagram_check(self):
         """

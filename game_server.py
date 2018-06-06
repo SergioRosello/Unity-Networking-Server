@@ -2,7 +2,8 @@ from datetime import datetime
 from threading import Thread, Lock
 from random import randint, uniform
 import json
-from time import sleep
+from time import sleep, time
+from exceptions import *
 
 from misc import distance, estimate_current_position
 from tapnet import TapNet
@@ -14,6 +15,7 @@ DISCONNECT_REQUEST = "disconnect"
 
 DATE_FORMAT = '%Y/%m/%d%H:%M:%S.%f'
 BOMB_RANGE = 3
+
 
 chest_lock = Lock()
 bomb_spawn_lock = Lock()
@@ -46,6 +48,7 @@ class GameServer:
         self.map_changes = []  # Informacion con los cambios que sufre el mapa, para poder sincronizarlos con los clientes
 
         self.server = None
+        self.start_time = time()
 
     def generate_map(self):
         """
@@ -92,7 +95,6 @@ class GameServer:
         """
         Genera los cofres. Realiza su trabajo en otro thread.
         """
-        # TODO: Implementar con locks (Creemos que esta bien)
         chest_id = 0
         while self.current_timer > -1:
             sleep(
@@ -113,7 +115,6 @@ class GameServer:
         """
         Genera las bombas. Realiza su trabajo en otro thread.
         """
-        # TODO: Implementar con locks (Creemos que esta bien)
         bomb_id = 0
         while self.current_timer > -1:
             sleep(
@@ -133,7 +134,6 @@ class GameServer:
         """
         Elimina a los jugadores que esten caidos. Realiza su trabajo en otro thread.
         """
-        # TODO: Implementar con locks (Creemos que esta bien)
         while self.current_timer > -1:
             with player_lock:
                 for k, v in list(self.current_players.items()):
@@ -142,29 +142,26 @@ class GameServer:
                     time_elapsed = (datetime.now() - last_player_update_object).total_seconds()
                     if time_elapsed > 1:
                         del (self.current_players[k])
-            sleep(2)
+                sleep(2)
 
     """
     Se ejecuta en el hilo que lleva la cuenta atras de las bombas
     """
-
     def bomb_check(self):
         """
         Comprueba el estado de las bombas activas. Realiza su trabajo en otro thread.
         """
-        # TODO: Implementar con locks
-        # TODO: Decrementar el timer de las bombas
         # TODO: Excepciones
         while self.current_timer > -1:
-            with timer_lock:
-                for bomb in self.bombs:
-                    bomb['timer'] -= 0.1
-                    sleep(0.1)
 
             with player_damage_lock:
                 for bomb in self.bombs:
+                    if time() - 1 >= self.start_time:
+                        bomb['timer'] -= 1
+                        self.start_time = time()
+
                     if bomb['timer'] <= 0:
-                        bomb['timer'] -= 0.1
+
                         bomb_x = bomb['x']
                         bomb_y = bomb['y']
 
@@ -187,19 +184,23 @@ class GameServer:
                             self.map_changes.append(destroyed_tiles)
 
                         # Ver si damos a algun jugador:
+                        try:
+                            if self.current_players is None:
+                                raise NoPlayersException
+                            current_players = self.current_players
 
-                        current_players = self.current_players
-                        for k, v in current_players.items():
-                            player_pos = estimate_current_position(
-                                v['position'],
-                                v['velocity'],
-                                (datetime.now() - datetime.strptime(v.get('serverTimeStamp', ''),
-                                                                    DATE_FORMAT)).total_seconds()
-                            )
-                            if distance(bomb_x, bomb_y, player_pos['x'], player_pos['y']) <= BOMB_RANGE:
-                                v['health'] = 0
-                        self.current_players = current_players
-
+                            for k, v in current_players.items():
+                                player_pos = estimate_current_position(
+                                    v['position'],
+                                    v['velocity'],
+                                    (datetime.now() - datetime.strptime(v.get('serverTimeStamp', ''),
+                                                                        DATE_FORMAT)).total_seconds()
+                                )
+                                if distance(bomb_x, bomb_y, player_pos['x'], player_pos['y']) <= BOMB_RANGE:
+                                    v['health'] = 0
+                            self.current_players = current_players
+                        except NoPlayersException:
+                            print("No current players")
             with bombs_lock:
                 self.bombs = [bomb for bomb in self.bombs if bomb['timer'] > 0]
 
@@ -296,11 +297,11 @@ class GameServer:
         Arranca el servidor
         """
         server_address = ('127.0.0.1', 10000)
-        self.server = TapNet(server_address, self)
+        self.server = TapNet(server_address)
+        self.server.response_handler = self.handle_json
         self.server.start()
 
         while 1:
-            print('Vamo a ver')
             # En cada iteracion, reiniciamos los valores
             self.generate_map()
             self.current_players = {}
